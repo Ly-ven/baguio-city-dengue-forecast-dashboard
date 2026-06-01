@@ -1,6 +1,4 @@
-import io
 import json
-import zipfile
 from pathlib import Path
 
 import joblib
@@ -11,13 +9,13 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Baguio City Dengue Forecast Dashboard",
+    page_icon="🦟",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-st.title("Baguio City Dengue Forecast Dashboard")
-st.caption("Interactive web-based dashboard for dengue prediction, model evaluation, and forecast visualization")
-
+# =========================
+# CONFIG
+# =========================
 ARTIFACTS_DIR = Path("artifacts")
 
 DEFAULT_FEATURE_COLS = [
@@ -30,151 +28,164 @@ DEFAULT_FEATURE_COLS = [
     "month_sin", "month_cos",
 ]
 
-CSV_ALIASES = {
-    "monthly": ["prepared_dataset.csv", "monthly_modeling_dataset.csv"],
-    "model_results": ["model_results.csv", "model_comparison.csv"],
-    "feature_importance": ["feature_importance.csv"],
-    "sensitivity": ["sensitivity_analysis.csv", "feature_sensitivity.csv"],
-    "forecast": ["forecast_df.csv", "forecast_5yr.csv"],
+ARTIFACT_SPECS = {
+    "monthly": ["monthly_modeling_dataset.csv", "monthly.csv"],
+    "model_comparison": ["model_comparison.csv", "results_df.csv"],
+    "auc_df": ["auc_df.csv", "model_auc.csv"],
+    "feature_importance": ["feature_importance.csv", "importance_df.csv"],
+    "feature_sensitivity": ["feature_sensitivity.csv", "sensitivity_df.csv"],
+    "forecast": ["forecast_5yr.csv", "forecast_df.csv"],
+    "barangay_monthly": ["barangay_monthly.csv"],
+    "top_barangay_monthly": ["top_barangay_monthly.csv", "monthly_top_barangay.csv"],
+    "top3_barangays_yearly": ["top3_barangays_yearly.csv"],
+    "top3_barangays_overall": ["top3_barangays_overall.csv"],
     "test_predictions": ["test_predictions.csv"],
     "climate_case_correlation": ["climate_case_correlation.csv"],
     "month_profile": ["month_profile.csv"],
     "forecast_barangay_ranking": ["forecast_barangay_ranking.csv"],
     "forecast_top3_barangays": ["forecast_top3_barangays.csv"],
-    # Optional legacy or expanded files. The revised Colab export does not require these.
-    "barangay_monthly": ["barangay_monthly.csv"],
-    "top_barangay_monthly": ["top_barangay_monthly.csv", "monthly_top_barangay.csv"],
-    "top3_barangays_yearly": ["top3_barangays_yearly.csv"],
-    "top3_barangays_overall": ["top3_barangays_overall.csv"],
     "barangay_risk_profile": ["barangay_risk_profile.csv"],
 }
 
-MODEL_ALIASES = ["best_model.joblib", "best_model.pkl"]
-META_ALIASES = ["meta.json"]
+DATE_COLUMNS = {
+    "monthly", "forecast", "barangay_monthly", "top_barangay_monthly",
+    "test_predictions", "forecast_barangay_ranking", "forecast_top3_barangays",
+}
+
+st.markdown(
+    """
+<style>
+.block-container {padding-top: 1.4rem; padding-bottom: 2rem;}
+[data-testid="stMetricValue"] {font-size: 1.8rem;}
+.small-note {font-size: 0.9rem; color: #666;}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+st.title("Baguio City Dengue Forecast Dashboard")
+st.caption("Interactive web-based dashboard for predicting dengue outbreaks in Baguio City.")
 
 
-# -------------------------
-# Loading helpers
-# -------------------------
-def read_csv_from_dir(directory: Path, names):
-    for name in names:
-        path = directory / name
+# =========================
+# SAFE LOADING HELPERS
+# =========================
+def safe_read_csv_from_names(file_names):
+    for name in file_names:
+        path = ARTIFACTS_DIR / name
         if path.exists():
             return pd.read_csv(path)
     return None
 
 
-def read_json_from_dir(directory: Path, names):
-    for name in names:
-        path = directory / name
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+def safe_read_json(path: Path):
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
     return None
 
 
-def load_model_from_dir(directory: Path, names):
-    for name in names:
-        path = directory / name
-        if path.exists():
-            return joblib.load(path)
+def safe_load_model(path: Path):
+    if path.exists():
+        return joblib.load(path)
     return None
 
 
 @st.cache_data(show_spinner=False)
-def load_csv_artifacts_from_dir():
-    return {key: read_csv_from_dir(ARTIFACTS_DIR, names) for key, names in CSV_ALIASES.items()}
+def load_artifacts():
+    loaded = {key: safe_read_csv_from_names(names) for key, names in ARTIFACT_SPECS.items()}
+    loaded["meta"] = safe_read_json(ARTIFACTS_DIR / "meta.json")
+    return loaded
 
 
-@st.cache_data(show_spinner=False)
-def load_meta_from_dir():
-    return read_json_from_dir(ARTIFACTS_DIR, META_ALIASES)
+artifacts = load_artifacts()
+model = safe_load_model(ARTIFACTS_DIR / "best_model.joblib")
 
 
-@st.cache_resource(show_spinner=False)
-def load_model_resource_from_dir():
-    return load_model_from_dir(ARTIFACTS_DIR, MODEL_ALIASES)
+# =========================
+# SIDEBAR UPLOADS
+# =========================
+st.sidebar.header("Dashboard Files")
+st.sidebar.write(
+    "Place your exported Colab files inside an `artifacts/` folder, or upload them manually below."
+)
+
+meta = artifacts.get("meta")
+if meta:
+    st.sidebar.success(f"Best Model: {meta.get('best_model', 'Unknown')}")
+    threshold_val = meta.get("outbreak_threshold_cases", meta.get("threshold", "N/A"))
+    if isinstance(threshold_val, (int, float)):
+        st.sidebar.info(f"Outbreak Threshold: {threshold_val:.2f}")
+    else:
+        st.sidebar.info(f"Outbreak Threshold: {threshold_val}")
+else:
+    st.sidebar.warning("meta.json not found. The dashboard will still run if the main CSV files are available.")
+
+with st.sidebar.expander("Manual file upload", expanded=False):
+    uploaded_files = {}
+    uploaded_files["monthly"] = st.file_uploader("monthly_modeling_dataset.csv", type=["csv"])
+    uploaded_files["model_comparison"] = st.file_uploader("model_comparison.csv", type=["csv"])
+    uploaded_files["auc_df"] = st.file_uploader("auc_df.csv / model_auc.csv", type=["csv"])
+    uploaded_files["feature_importance"] = st.file_uploader("feature_importance.csv", type=["csv"])
+    uploaded_files["feature_sensitivity"] = st.file_uploader("feature_sensitivity.csv", type=["csv"])
+    uploaded_files["forecast"] = st.file_uploader("forecast_5yr.csv", type=["csv"])
+    uploaded_files["barangay_monthly"] = st.file_uploader("barangay_monthly.csv", type=["csv"])
+    uploaded_files["top_barangay_monthly"] = st.file_uploader("top_barangay_monthly.csv / monthly_top_barangay.csv", type=["csv"])
+    uploaded_files["top3_barangays_yearly"] = st.file_uploader("top3_barangays_yearly.csv", type=["csv"])
+    uploaded_files["top3_barangays_overall"] = st.file_uploader("top3_barangays_overall.csv", type=["csv"])
+    uploaded_files["test_predictions"] = st.file_uploader("test_predictions.csv", type=["csv"])
+    uploaded_files["climate_case_correlation"] = st.file_uploader("climate_case_correlation.csv", type=["csv"])
+    uploaded_files["month_profile"] = st.file_uploader("month_profile.csv", type=["csv"])
+    uploaded_files["forecast_barangay_ranking"] = st.file_uploader("forecast_barangay_ranking.csv", type=["csv"])
+    uploaded_files["forecast_top3_barangays"] = st.file_uploader("forecast_top3_barangays.csv", type=["csv"])
+    uploaded_files["barangay_risk_profile"] = st.file_uploader("barangay_risk_profile.csv", type=["csv"])
+    uploaded_meta = st.file_uploader("meta.json", type=["json"])
+    uploaded_model = st.file_uploader("best_model.joblib / best_model.pkl", type=["joblib", "pkl"])
+
+for key, uploaded in uploaded_files.items():
+    if uploaded is not None:
+        artifacts[key] = pd.read_csv(uploaded)
+
+if uploaded_meta is not None:
+    meta = json.load(uploaded_meta)
+    artifacts["meta"] = meta
+
+if uploaded_model is not None:
+    model = joblib.load(uploaded_model)
+
+monthly = artifacts.get("monthly")
+model_comparison = artifacts.get("model_comparison")
+auc_df = artifacts.get("auc_df")
+feature_importance = artifacts.get("feature_importance")
+feature_sensitivity = artifacts.get("feature_sensitivity")
+forecast = artifacts.get("forecast")
+barangay_monthly = artifacts.get("barangay_monthly")
+top_barangay_monthly = artifacts.get("top_barangay_monthly")
+top3_barangays_yearly = artifacts.get("top3_barangays_yearly")
+top3_barangays_overall = artifacts.get("top3_barangays_overall")
+test_predictions = artifacts.get("test_predictions")
+climate_case_correlation = artifacts.get("climate_case_correlation")
+month_profile = artifacts.get("month_profile")
+forecast_barangay_ranking = artifacts.get("forecast_barangay_ranking")
+forecast_top3_barangays = artifacts.get("forecast_top3_barangays")
+barangay_risk_profile = artifacts.get("barangay_risk_profile")
+
+if monthly is None or monthly.empty:
+    st.error("monthly_modeling_dataset.csv is required. Export it from the revised Colab workflow, then place it in the artifacts folder or upload it in the sidebar.")
+    st.stop()
+
+# Parse dates safely after loading/uploading.
+for key in DATE_COLUMNS:
+    df_obj = locals().get(key)
+    if df_obj is not None and "Date" in df_obj.columns:
+        df_obj = df_obj.copy()
+        df_obj["Date"] = pd.to_datetime(df_obj["Date"], errors="coerce")
+        locals()[key] = df_obj
 
 
-def _zip_contains(zf, filename):
-    target = filename.replace("\\", "/")
-    for member in zf.namelist():
-        if member.replace("\\", "/").split("/")[-1] == target:
-            return member
-    return None
-
-
-@st.cache_data(show_spinner=False)
-def load_csv_artifacts_from_zip(zip_bytes):
-    out = {key: None for key in CSV_ALIASES}
-    if not zip_bytes:
-        return out
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for key, names in CSV_ALIASES.items():
-            for name in names:
-                member = _zip_contains(zf, name)
-                if member is not None:
-                    with zf.open(member) as f:
-                        out[key] = pd.read_csv(f)
-                    break
-    return out
-
-
-@st.cache_data(show_spinner=False)
-def load_meta_from_zip(zip_bytes):
-    if not zip_bytes:
-        return None
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for name in META_ALIASES:
-            member = _zip_contains(zf, name)
-            if member is not None:
-                with zf.open(member) as f:
-                    return json.loads(f.read().decode("utf-8"))
-    return None
-
-
-@st.cache_resource(show_spinner=False)
-def load_model_from_zip(zip_bytes):
-    if not zip_bytes:
-        return None
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for name in MODEL_ALIASES:
-            member = _zip_contains(zf, name)
-            if member is not None:
-                with zf.open(member) as f:
-                    return joblib.load(io.BytesIO(f.read()))
-    return None
-
-
-def coalesce_artifacts(base, override):
-    merged = dict(base)
-    for key, value in override.items():
-        if value is not None:
-            merged[key] = value
-    return merged
-
-
-def parse_dates(df):
-    if df is not None and "Date" in df.columns:
-        df = df.copy()
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    return df
-
-
-def safe_metric_value(value, decimals=2):
-    if value is None or pd.isna(value):
-        return "N/A"
-    return f"{float(value):.{decimals}f}"
-
-
-def round_display_columns(df, columns, decimals=2):
-    df = df.copy()
-    for col in columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").round(decimals)
-    return df
-
-
+# =========================
+# DATA CLEANUP / DERIVED TABLES
+# =========================
 def month_name_from_number(month_num):
     month_names = {
         1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
@@ -186,66 +197,124 @@ def month_name_from_number(month_num):
         return str(month_num)
 
 
-def outbreak_label_from_binary(value):
+def safe_metric_value(value, decimals=2):
     try:
-        return "Outbreak" if int(value) == 1 else "Non-outbreak"
+        if pd.isna(value):
+            return "N/A"
+        return f"{float(value):.{decimals}f}"
     except Exception:
-        return "Unknown"
-
-
-def get_feature_columns(meta, model=None):
-    if meta:
-        if isinstance(meta.get("feature_cols"), list):
-            return meta["feature_cols"]
-        if isinstance(meta.get("feature_columns"), list):
-            return meta["feature_columns"]
-    if model is not None and hasattr(model, "feature_names_in_"):
-        return list(model.feature_names_in_)
-    return DEFAULT_FEATURE_COLS
-
-
-def get_threshold_text(meta):
-    if not meta:
         return "N/A"
-    threshold = meta.get("outbreak_threshold", meta.get("outbreak_threshold_cases", None))
-    if threshold is None:
-        return "N/A"
-    if isinstance(threshold, (int, float)):
-        return f"{threshold:.2f} cases"
-    return str(threshold)
 
 
-def get_month_profile_row(month_num, month_profile_df):
-    if month_profile_df is None or month_profile_df.empty or "Month" not in month_profile_df.columns:
+def round_display_columns(df, columns, decimals=2):
+    df = df.copy()
+    for col in columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").round(decimals)
+    return df
+
+
+def display_clean_barangay_columns(df):
+    if df is None:
         return None
-    subset = month_profile_df[pd.to_numeric(month_profile_df["Month"], errors="coerce") == int(month_num)]
-    if subset.empty:
+    df = df.copy()
+    rename_map = {
+        "Top_Barangay": "Barangay",
+        "Top_Barangay_Cases": "Barangay_cases",
+        "rank_within_year": "Rank Within Year",
+        "rank": "Rank",
+        "Barangay_cases": "Dengue Cases",
+    }
+    return df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+
+
+def complete_month_profile(month_profile_df, monthly_df):
+    """Ensure month_profile has the climate columns needed for default live-prediction values."""
+    if monthly_df is None or "Month" not in monthly_df.columns:
+        return month_profile_df
+
+    needed = ["CHSO_cases", "rainfall", "relative_humidity", "temp_mid"]
+    available_needed = [c for c in needed if c in monthly_df.columns]
+    if not available_needed:
+        return month_profile_df
+
+    generated = monthly_df.groupby("Month", as_index=False)[available_needed].mean()
+    generated["MonthName"] = generated["Month"].apply(month_name_from_number)
+
+    if month_profile_df is None or month_profile_df.empty:
+        return generated
+
+    fixed = month_profile_df.copy()
+    if "Month" not in fixed.columns:
+        return generated
+
+    for col in ["CHSO_cases", "rainfall", "relative_humidity", "temp_mid"]:
+        if col not in fixed.columns and col in generated.columns:
+            fixed = fixed.merge(generated[["Month", col]], on="Month", how="left")
+    if "MonthName" not in fixed.columns:
+        fixed["MonthName"] = fixed["Month"].apply(month_name_from_number)
+    return fixed
+
+
+def build_climate_case_correlation(monthly_df):
+    if monthly_df is None or "CHSO_cases" not in monthly_df.columns:
         return None
-    return subset.iloc[0]
+    rows = []
+    for feat in ["rainfall", "relative_humidity", "temp_mid"]:
+        if feat in monthly_df.columns:
+            sub = monthly_df[[feat, "CHSO_cases"]].apply(pd.to_numeric, errors="coerce").dropna()
+            corr = sub.corr().iloc[0, 1] if len(sub) > 1 else np.nan
+            rows.append({"feature": feat, "pearson_corr_with_CHSO_cases": corr})
+    if not rows:
+        return None
+    return pd.DataFrame(rows).sort_values("pearson_corr_with_CHSO_cases", ascending=False)
+
+
+def normalize_model_comparison(model_df, auc_table):
+    if model_df is None or model_df.empty:
+        return model_df
+
+    model_df = model_df.copy()
+    # Support both revised Colab naming styles: auc and AUC.
+    if "AUC" in model_df.columns and "auc" not in model_df.columns:
+        model_df = model_df.rename(columns={"AUC": "auc"})
+
+    if "auc" not in model_df.columns and auc_table is not None and not auc_table.empty:
+        auc_tmp = auc_table.copy()
+        if "AUC" in auc_tmp.columns and "auc" not in auc_tmp.columns:
+            auc_tmp = auc_tmp.rename(columns={"AUC": "auc"})
+        if {"model", "auc"}.issubset(auc_tmp.columns):
+            model_df = model_df.merge(auc_tmp[["model", "auc"]], on="model", how="left")
+
+    return model_df
 
 
 def get_profile_value(month_num, col_name, month_profile_df, fallback_df=None, default=0.0):
-    row = get_month_profile_row(month_num, month_profile_df)
-    if row is not None and col_name in row.index and pd.notna(row[col_name]):
-        return float(row[col_name])
+    if month_profile_df is not None and not month_profile_df.empty and "Month" in month_profile_df.columns:
+        subset = month_profile_df[pd.to_numeric(month_profile_df["Month"], errors="coerce") == int(month_num)]
+        if not subset.empty and col_name in subset.columns:
+            value = pd.to_numeric(pd.Series([subset.iloc[0][col_name]]), errors="coerce").iloc[0]
+            if pd.notna(value):
+                return float(value)
+
     if fallback_df is not None and col_name in fallback_df.columns:
         series = pd.to_numeric(fallback_df[col_name], errors="coerce").dropna()
         if len(series) > 0:
             return float(series.mean())
+
     return float(default)
 
 
-def get_previous_year_months(year_num, month_num):
-    periods = []
-    current_year = int(year_num)
-    current_month = int(month_num)
-    for _ in range(3):
-        current_month -= 1
-        if current_month == 0:
-            current_month = 12
-            current_year -= 1
-        periods.append((current_year, current_month))
-    return periods[0], periods[1], periods[2]
+def get_reasonable_range(df, col_name, fallback_min=0.0, fallback_max=100.0):
+    if df is not None and col_name in df.columns:
+        series = pd.to_numeric(df[col_name], errors="coerce").dropna()
+        if len(series) > 0:
+            vmin = float(series.min())
+            vmax = float(series.max())
+            if vmin == vmax:
+                vmax = vmin + 1.0
+            return vmin, vmax
+    return fallback_min, fallback_max
 
 
 def get_forecast_row(forecast_df, year_num, month_num):
@@ -260,33 +329,17 @@ def get_forecast_row(forecast_df, year_num, month_num):
     return subset.iloc[0]
 
 
-def numeric_from_row(row, col_name, default=0.0):
-    if row is None:
-        return float(default)
-    value = row.get(col_name, default)
-    value = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
-    if pd.isna(value):
-        return float(default)
-    return float(value)
-
-
-def get_reasonable_range(df, col_name, fallback_min=0.0, fallback_max=100.0, include_values=None):
-    values = []
-    if df is not None and col_name in df.columns:
-        values.extend(pd.to_numeric(df[col_name], errors="coerce").dropna().tolist())
-    if include_values:
-        values.extend([float(v) for v in include_values if v is not None and not pd.isna(v)])
-    if values:
-        vmin = float(min(values))
-        vmax = float(max(values))
-        if vmin == vmax:
-            vmax = vmin + 1.0
-        return vmin, vmax
-    return fallback_min, fallback_max
-
-
-def clamp(value, min_value, max_value):
-    return float(max(min_value, min(max_value, value)))
+def previous_month_numbers(year_num, month_num):
+    periods = []
+    current_year = int(year_num)
+    current_month = int(month_num)
+    for _ in range(3):
+        current_month -= 1
+        if current_month == 0:
+            current_month = 12
+            current_year -= 1
+        periods.append((current_year, current_month))
+    return periods
 
 
 def build_live_prediction_features(
@@ -299,30 +352,32 @@ def build_live_prediction_features(
     cases_lag_2,
     cases_lag_3,
     month_profile_df,
-    fallback_monthly_df,
+    monthly_df,
     forecast_row=None,
 ):
     if forecast_row is not None:
-        rainfall_lag_1 = numeric_from_row(forecast_row, "rainfall_lag_1", 0.0)
-        rainfall_lag_2 = numeric_from_row(forecast_row, "rainfall_lag_2", 0.0)
-        rainfall_lag_3 = numeric_from_row(forecast_row, "rainfall_lag_3", 0.0)
-        rh_lag_1 = numeric_from_row(forecast_row, "relative_humidity_lag_1", 0.0)
-        rh_lag_2 = numeric_from_row(forecast_row, "relative_humidity_lag_2", 0.0)
-        rh_lag_3 = numeric_from_row(forecast_row, "relative_humidity_lag_3", 0.0)
-        temp_lag_1 = numeric_from_row(forecast_row, "temp_mid_lag_1", 0.0)
-        temp_lag_2 = numeric_from_row(forecast_row, "temp_mid_lag_2", 0.0)
-        temp_lag_3 = numeric_from_row(forecast_row, "temp_mid_lag_3", 0.0)
+        rainfall_lag_1 = float(pd.to_numeric(pd.Series([forecast_row.get("rainfall_lag_1", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+        rainfall_lag_2 = float(pd.to_numeric(pd.Series([forecast_row.get("rainfall_lag_2", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+        rainfall_lag_3 = float(pd.to_numeric(pd.Series([forecast_row.get("rainfall_lag_3", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+
+        rh_lag_1 = float(pd.to_numeric(pd.Series([forecast_row.get("relative_humidity_lag_1", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+        rh_lag_2 = float(pd.to_numeric(pd.Series([forecast_row.get("relative_humidity_lag_2", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+        rh_lag_3 = float(pd.to_numeric(pd.Series([forecast_row.get("relative_humidity_lag_3", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+
+        temp_lag_1 = float(pd.to_numeric(pd.Series([forecast_row.get("temp_mid_lag_1", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+        temp_lag_2 = float(pd.to_numeric(pd.Series([forecast_row.get("temp_mid_lag_2", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
+        temp_lag_3 = float(pd.to_numeric(pd.Series([forecast_row.get("temp_mid_lag_3", np.nan)]), errors="coerce").fillna(0.0).iloc[0])
     else:
-        (_, prev1), (_, prev2), (_, prev3) = get_previous_year_months(year_num, month_num)
-        rainfall_lag_1 = get_profile_value(prev1, "rainfall", month_profile_df, fallback_monthly_df, 0.0)
-        rainfall_lag_2 = get_profile_value(prev2, "rainfall", month_profile_df, fallback_monthly_df, 0.0)
-        rainfall_lag_3 = get_profile_value(prev3, "rainfall", month_profile_df, fallback_monthly_df, 0.0)
-        rh_lag_1 = get_profile_value(prev1, "relative_humidity", month_profile_df, fallback_monthly_df, 0.0)
-        rh_lag_2 = get_profile_value(prev2, "relative_humidity", month_profile_df, fallback_monthly_df, 0.0)
-        rh_lag_3 = get_profile_value(prev3, "relative_humidity", month_profile_df, fallback_monthly_df, 0.0)
-        temp_lag_1 = get_profile_value(prev1, "temp_mid", month_profile_df, fallback_monthly_df, 0.0)
-        temp_lag_2 = get_profile_value(prev2, "temp_mid", month_profile_df, fallback_monthly_df, 0.0)
-        temp_lag_3 = get_profile_value(prev3, "temp_mid", month_profile_df, fallback_monthly_df, 0.0)
+        (_, prev1), (_, prev2), (_, prev3) = previous_month_numbers(year_num, month_num)
+        rainfall_lag_1 = get_profile_value(prev1, "rainfall", month_profile_df, monthly_df, 0.0)
+        rainfall_lag_2 = get_profile_value(prev2, "rainfall", month_profile_df, monthly_df, 0.0)
+        rainfall_lag_3 = get_profile_value(prev3, "rainfall", month_profile_df, monthly_df, 0.0)
+        rh_lag_1 = get_profile_value(prev1, "relative_humidity", month_profile_df, monthly_df, 0.0)
+        rh_lag_2 = get_profile_value(prev2, "relative_humidity", month_profile_df, monthly_df, 0.0)
+        rh_lag_3 = get_profile_value(prev3, "relative_humidity", month_profile_df, monthly_df, 0.0)
+        temp_lag_1 = get_profile_value(prev1, "temp_mid", month_profile_df, monthly_df, 0.0)
+        temp_lag_2 = get_profile_value(prev2, "temp_mid", month_profile_df, monthly_df, 0.0)
+        temp_lag_3 = get_profile_value(prev3, "temp_mid", month_profile_df, monthly_df, 0.0)
 
     cases_roll3_mean = float(np.mean([cases_lag_1, cases_lag_2, cases_lag_3]))
     cases_roll3_max = float(np.max([cases_lag_1, cases_lag_2, cases_lag_3]))
@@ -350,168 +405,86 @@ def build_live_prediction_features(
     }
 
 
-def get_selected_barangay_ranking(ranking_df, top3_df, year_num, month_num, probability, input_values):
-    source = None
-    if ranking_df is not None and not ranking_df.empty and {"Year", "Month"}.issubset(ranking_df.columns):
-        source = ranking_df[
-            (pd.to_numeric(ranking_df["Year"], errors="coerce") == int(year_num)) &
-            (pd.to_numeric(ranking_df["Month"], errors="coerce") == int(month_num))
-        ].copy()
-    if (source is None or source.empty) and top3_df is not None and not top3_df.empty and {"Year", "Month"}.issubset(top3_df.columns):
-        source = top3_df[
-            (pd.to_numeric(top3_df["Year"], errors="coerce") == int(year_num)) &
-            (pd.to_numeric(top3_df["Month"], errors="coerce") == int(month_num))
-        ].copy()
-    if source is None or source.empty or "Barangay" not in source.columns:
-        return None
-
-    if "risk_score" in source.columns:
-        scores = pd.to_numeric(source["risk_score"], errors="coerce").fillna(0.0)
-    elif "risk_score_raw" in source.columns:
-        scores = pd.to_numeric(source["risk_score_raw"], errors="coerce").fillna(0.0)
-    elif "predicted_barangay_cases_proxy" in source.columns:
-        scores = pd.to_numeric(source["predicted_barangay_cases_proxy"], errors="coerce").fillna(0.0)
-    else:
-        scores = pd.Series(np.ones(len(source)), index=source.index)
-
-    score_sum = float(scores.sum())
-    source["risk_score"] = scores / score_sum if score_sum > 0 else 0.0
-
-    prob = 0.0 if probability is None or pd.isna(probability) else float(probability)
-    city_cases_proxy = float(input_values.get("cases_roll3_mean", 0.0)) * (1.0 + prob)
-    source["predicted_city_cases_proxy"] = city_cases_proxy
-    source["predicted_barangay_cases_proxy"] = source["risk_score"] * city_cases_proxy
-    source["predicted_barangay_label"] = "Higher Risk"
-
-    return source.sort_values("predicted_barangay_cases_proxy", ascending=False).head(3)
+def outbreak_label_from_binary(x):
+    try:
+        return "Outbreak" if int(x) == 1 else "Non-outbreak"
+    except Exception:
+        return "Unknown"
 
 
-# -------------------------
-# Load artifacts
-# -------------------------
-st.sidebar.header("About")
-st.sidebar.write(
-    "This dashboard displays historical dengue cases, model results, feature contributions, "
-    "forecast outputs, and live prediction from the revised Google Colab workflow."
-)
+month_profile = complete_month_profile(month_profile, monthly)
+model_comparison = normalize_model_comparison(model_comparison, auc_df)
+if climate_case_correlation is None or climate_case_correlation.empty:
+    climate_case_correlation = build_climate_case_correlation(monthly)
 
-uploaded_zip = st.sidebar.file_uploader(
-    "Upload dashboard_artifacts.zip (optional)",
-    type=["zip"],
-    help="Use this only if the artifacts folder is not already included in your GitHub repository.",
-)
 
-base_artifacts = load_csv_artifacts_from_dir()
-base_meta = load_meta_from_dir()
-base_model = load_model_resource_from_dir()
-
-if uploaded_zip is not None:
-    zip_bytes = uploaded_zip.getvalue()
-    zip_artifacts = load_csv_artifacts_from_zip(zip_bytes)
-    zip_meta = load_meta_from_zip(zip_bytes)
-    zip_model = load_model_from_zip(zip_bytes)
-    artifacts = coalesce_artifacts(base_artifacts, zip_artifacts)
-    meta = zip_meta if zip_meta is not None else base_meta
-    model = zip_model if zip_model is not None else base_model
-    st.sidebar.success("ZIP artifacts loaded.")
-else:
-    artifacts = base_artifacts
-    meta = base_meta
-    model = base_model
-
-monthly = parse_dates(artifacts["monthly"])
-model_results = artifacts["model_results"]
-feature_importance = artifacts["feature_importance"]
-sensitivity = artifacts["sensitivity"]
-forecast = parse_dates(artifacts["forecast"])
-test_predictions = parse_dates(artifacts["test_predictions"])
-climate_case_correlation = artifacts["climate_case_correlation"]
-month_profile = artifacts["month_profile"]
-forecast_barangay_ranking = parse_dates(artifacts["forecast_barangay_ranking"])
-forecast_top3_barangays = parse_dates(artifacts["forecast_top3_barangays"])
-barangay_monthly = parse_dates(artifacts["barangay_monthly"])
-top_barangay_monthly = parse_dates(artifacts["top_barangay_monthly"])
-top3_barangays_yearly = artifacts["top3_barangays_yearly"]
-top3_barangays_overall = artifacts["top3_barangays_overall"]
-barangay_risk_profile = artifacts["barangay_risk_profile"]
-
-if meta:
-    st.sidebar.success(f"Best Model: {meta.get('best_model', 'Unknown')}")
-    st.sidebar.info(f"Outbreak Threshold: {get_threshold_text(meta)}")
-    if meta.get("reliability_metric"):
-        st.sidebar.caption(f"Reliability metric: {meta.get('reliability_metric')}")
-else:
-    st.sidebar.warning("meta.json not found.")
-
-if model is None:
-    st.sidebar.warning("best_model.joblib not found. Forecast charts will still show, but live prediction will be disabled.")
-else:
-    st.sidebar.success("Model file loaded.")
-
-if monthly is None:
-    st.error("prepared_dataset.csv is required. Put dashboard_artifacts.zip contents inside an artifacts/ folder, or upload the ZIP in the sidebar.")
-    st.stop()
-
-# Make sure month profile has month names even if revised export only contains Month and CHSO_cases.
-if month_profile is not None and not month_profile.empty and "Month" in month_profile.columns and "MonthName" not in month_profile.columns:
-    month_profile = month_profile.copy()
-    month_profile["MonthName"] = month_profile["Month"].apply(month_name_from_number)
-
-feature_columns = get_feature_columns(meta, model)
-
-# -------------------------
-# Dashboard tabs
-# -------------------------
+# =========================
+# TABS
+# =========================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Overview",
     "Barangay Analytics",
     "Model Results",
     "Feature Transparency",
-    "Forecast & Prediction",
+    "Forecast & Live Prediction",
 ])
 
 with tab1:
     st.header("Historical Dengue Overview")
 
+    total_months = len(monthly)
     total_cases = int(pd.to_numeric(monthly.get("CHSO_cases", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if "CHSO_cases" in monthly.columns else 0
     avg_cases = pd.to_numeric(monthly["CHSO_cases"], errors="coerce").mean() if "CHSO_cases" in monthly.columns else np.nan
-    outbreak_months = int(pd.to_numeric(monthly.get("outbreak", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if "outbreak" in monthly.columns else None
+    outbreak_months = int(pd.to_numeric(monthly.get("outbreak", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if "outbreak" in monthly.columns else "N/A"
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Months", len(monthly))
-    col2.metric("Total Cases", f"{total_cases:,}")
+    col1.metric("Total Months", total_months)
+    col2.metric("Total CHSO Cases", f"{total_cases:,}")
     col3.metric("Average Monthly Cases", safe_metric_value(avg_cases))
-    col4.metric("Outbreak Months", outbreak_months if outbreak_months is not None else "N/A")
+    col4.metric("Outbreak Months", outbreak_months)
 
-    st.subheader("What is the model predicting?")
-    threshold_text = get_threshold_text(meta)
-    st.info(
-        "The model predicts whether a selected month is classified as an **outbreak** or **non-outbreak** month. "
-        f"The revised Colab metadata reports an outbreak threshold of **{threshold_text}**."
-    )
+    st.subheader("Model Prediction Target")
+    if meta:
+        st.info(
+            f"**Problem Definition:** {meta.get('problem_definition', 'Monthly outbreak classification')}  \n"
+            f"**Outbreak Definition:** {meta.get('outbreak_definition', 'Monthly CHSO cases greater than or equal to the selected percentile threshold.')}"
+        )
+    else:
+        st.info("The model predicts whether a selected month is classified as an outbreak or non-outbreak month.")
 
     st.subheader("Monthly Dengue Cases")
     if {"Date", "CHSO_cases"}.issubset(monthly.columns):
-        fig_line = px.line(
-            monthly,
-            x="Date",
-            y="CHSO_cases",
-            markers=True,
-            title="Monthly Dengue Cases in Baguio City (CHSO)",
-        )
+        trend_cols = ["Date", "CHSO_cases"]
+        if "DOH_cases" in monthly.columns:
+            trend_cols.append("DOH_cases")
+            trend_long = monthly[trend_cols].melt(id_vars="Date", var_name="Source", value_name="Cases")
+            fig_line = px.line(
+                trend_long,
+                x="Date",
+                y="Cases",
+                color="Source",
+                markers=True,
+                title="Monthly Dengue Cases: CHSO and DOH Comparison",
+            )
+        else:
+            fig_line = px.line(
+                monthly,
+                x="Date",
+                y="CHSO_cases",
+                markers=True,
+                title="Monthly Dengue Cases in Baguio City (CHSO)",
+            )
         st.plotly_chart(fig_line, use_container_width=True)
-    else:
-        st.warning("Date and CHSO_cases columns are required for the monthly case chart.")
 
-    st.subheader("Year-Month Heatmap of Dengue Cases")
+    st.subheader("Year-Month Heatmap of CHSO Dengue Cases")
     if {"Year", "Month", "CHSO_cases"}.issubset(monthly.columns):
         heat = monthly.pivot_table(index="Year", columns="Month", values="CHSO_cases", aggfunc="sum")
         fig_heat = px.imshow(
             heat,
             text_auto=True,
             aspect="auto",
-            color_continuous_scale="Blues",
-            title="Year-Month Heatmap of Dengue Cases",
+            color_continuous_scale="YlOrRd",
+            title="Year-Month Heatmap of CHSO Dengue Cases",
         )
         fig_heat.update_xaxes(title="Month")
         fig_heat.update_yaxes(title="Year")
@@ -519,7 +492,7 @@ with tab1:
 
     st.subheader("Rainfall vs Relative Humidity Sized by Dengue Cases")
     if {"rainfall", "relative_humidity", "CHSO_cases"}.issubset(monthly.columns):
-        hover_cols = [c for c in ["Date", "temp_mid", "outbreak"] if c in monthly.columns]
+        hover_cols = [col for col in ["Date", "temp_mid", "CHSO_cases"] if col in monthly.columns]
         fig_bubble = px.scatter(
             monthly,
             x="rainfall",
@@ -527,83 +500,123 @@ with tab1:
             size="CHSO_cases",
             color="CHSO_cases",
             hover_data=hover_cols,
-            title="Rainfall vs Relative Humidity Sized by Dengue Cases",
+            title="Rainfall vs Relative Humidity Sized by CHSO Dengue Cases",
         )
         st.plotly_chart(fig_bubble, use_container_width=True)
 
-    st.subheader("Climate-Case Correlation")
-    if climate_case_correlation is not None and not climate_case_correlation.empty:
-        st.dataframe(round_display_columns(climate_case_correlation, ["pearson_corr_with_CHSO_cases"], 4), use_container_width=True)
-        if {"feature", "pearson_corr_with_CHSO_cases"}.issubset(climate_case_correlation.columns):
-            fig_corr = px.bar(
-                round_display_columns(climate_case_correlation, ["pearson_corr_with_CHSO_cases"], 4),
-                x="feature",
-                y="pearson_corr_with_CHSO_cases",
-                text="pearson_corr_with_CHSO_cases",
-                title="Climate-Case Correlation",
-            )
-            fig_corr.update_traces(texttemplate="%{text:.4f}", textposition="outside")
-            st.plotly_chart(fig_corr, use_container_width=True)
-    else:
-        st.warning("climate_case_correlation.csv not found or empty.")
+    chart_col1, chart_col2 = st.columns(2)
+    with chart_col1:
+        st.subheader("Climate-Case Correlation")
+        if climate_case_correlation is not None and not climate_case_correlation.empty:
+            corr_display = round_display_columns(climate_case_correlation, ["pearson_corr_with_CHSO_cases"], decimals=4)
+            st.dataframe(corr_display, use_container_width=True)
+            if {"feature", "pearson_corr_with_CHSO_cases"}.issubset(climate_case_correlation.columns):
+                fig_corr = px.bar(
+                    round_display_columns(climate_case_correlation, ["pearson_corr_with_CHSO_cases"], decimals=4),
+                    x="feature",
+                    y="pearson_corr_with_CHSO_cases",
+                    text="pearson_corr_with_CHSO_cases",
+                    title="Climate-Case Correlation",
+                )
+                fig_corr.update_traces(texttemplate="%{text:.4f}", textposition="outside")
+                st.plotly_chart(fig_corr, use_container_width=True)
+        else:
+            st.warning("Climate correlation table is unavailable.")
 
-    st.subheader("Average Monthly Profile")
-    if month_profile is not None and not month_profile.empty:
-        st.dataframe(round_display_columns(month_profile, ["CHSO_cases", "rainfall", "relative_humidity", "temp_mid"], 2), use_container_width=True)
-        if {"MonthName", "CHSO_cases"}.issubset(month_profile.columns):
-            fig_month_profile = px.bar(
-                round_display_columns(month_profile, ["CHSO_cases"], 2),
-                x="MonthName",
-                y="CHSO_cases",
-                text="CHSO_cases",
-                title="Average CHSO Cases by Month",
-            )
-            fig_month_profile.update_traces(texttemplate="%{text:.2f}", textposition="outside")
-            st.plotly_chart(fig_month_profile, use_container_width=True)
-    else:
-        st.warning("month_profile.csv not found or empty.")
+    with chart_col2:
+        st.subheader("Average Monthly Profile")
+        if month_profile is not None and not month_profile.empty:
+            display_cols = [c for c in ["Month", "MonthName", "CHSO_cases", "rainfall", "relative_humidity", "temp_mid"] if c in month_profile.columns]
+            numeric_display_cols = [c for c in display_cols if c != "MonthName"]
+            st.dataframe(round_display_columns(month_profile[display_cols], numeric_display_cols, 2), use_container_width=True)
+            if {"MonthName", "CHSO_cases"}.issubset(month_profile.columns):
+                fig_month = px.bar(
+                    round_display_columns(month_profile, ["CHSO_cases"], 2),
+                    x="MonthName",
+                    y="CHSO_cases",
+                    text="CHSO_cases",
+                    title="Average CHSO Cases by Month",
+                )
+                fig_month.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+                st.plotly_chart(fig_month, use_container_width=True)
+        else:
+            st.warning("month_profile.csv is unavailable.")
 
-    with st.expander("Prepared Dataset Preview"):
-        st.dataframe(monthly.head(60), use_container_width=True)
+    st.subheader("Climate Profile of Outbreak vs Non-outbreak Months")
+    if {"outbreak", "rainfall", "relative_humidity", "temp_mid"}.issubset(monthly.columns):
+        climate_profile = monthly.groupby("outbreak", as_index=False)[["rainfall", "relative_humidity", "temp_mid"]].mean()
+        climate_profile["Outbreak Status"] = climate_profile["outbreak"].map({0: "Non-outbreak", 1: "Outbreak"})
+        climate_long = climate_profile.melt(
+            id_vars="Outbreak Status",
+            value_vars=["rainfall", "relative_humidity", "temp_mid"],
+            var_name="Climate Variable",
+            value_name="Average Value",
+        )
+        fig_climate_profile = px.bar(
+            round_display_columns(climate_long, ["Average Value"], 2),
+            x="Climate Variable",
+            y="Average Value",
+            color="Outbreak Status",
+            barmode="group",
+            text="Average Value",
+            title="Climate Profile of Outbreak vs Non-outbreak Months",
+        )
+        fig_climate_profile.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+        st.plotly_chart(fig_climate_profile, use_container_width=True)
+    else:
+        st.caption("Climate profile is shown when monthly_modeling_dataset.csv includes outbreak, rainfall, relative_humidity, and temp_mid columns.")
 
 with tab2:
     st.header("Barangay Analytics")
 
-    st.subheader("Barangays with the Highest Monthly Dengue Cases")
-    if top_barangay_monthly is not None:
-        st.dataframe(top_barangay_monthly, use_container_width=True)
+    st.subheader("Barangay with the Highest Monthly Dengue Cases")
+    if top_barangay_monthly is not None and not top_barangay_monthly.empty:
+        st.dataframe(display_clean_barangay_columns(top_barangay_monthly), use_container_width=True)
+    else:
+        st.warning("top_barangay_monthly.csv or monthly_top_barangay.csv is unavailable.")
 
     st.subheader("Barangays with the Highest Dengue Cases")
     ranking_choice = st.radio(
         "Choose ranking view",
         ["Three Highest per Year", "Three Highest Overall"],
-        horizontal=True
+        horizontal=True,
     )
 
-    if ranking_choice == "Three Highest per Year" and top3_barangays_yearly is not None and not top3_barangays_yearly.empty:
-        fig_tree = px.treemap(
-            top3_barangays_yearly,
-            path=["Year", "Barangay"],
-            values="Barangay_cases",
-            color="Barangay_cases",
-            title="Three Barangays with the Highest Dengue Cases per Year"
-        )
-        st.plotly_chart(fig_tree, use_container_width=True)
-
-    elif ranking_choice == "Three Highest Overall" and top3_barangays_overall is not None and not top3_barangays_overall.empty:
-        fig_top3 = px.bar(
-            top3_barangays_overall,
-            x="Barangay",
-            y="Barangay_cases",
-            text="Barangay_cases",
-            title="Three Barangays with the Highest Overall Dengue Cases"
-        )
-        st.plotly_chart(fig_top3, use_container_width=True)
+    if ranking_choice == "Three Highest per Year":
+        if top3_barangays_yearly is not None and not top3_barangays_yearly.empty:
+            st.dataframe(display_clean_barangay_columns(top3_barangays_yearly), use_container_width=True)
+            if {"Year", "Barangay", "Barangay_cases"}.issubset(top3_barangays_yearly.columns):
+                fig_tree = px.treemap(
+                    top3_barangays_yearly,
+                    path=["Year", "Barangay"],
+                    values="Barangay_cases",
+                    color="Barangay_cases",
+                    title="Three Barangays with the Highest Dengue Cases per Year",
+                )
+                st.plotly_chart(fig_tree, use_container_width=True)
+        else:
+            st.warning("top3_barangays_yearly.csv is unavailable.")
+    else:
+        if top3_barangays_overall is not None and not top3_barangays_overall.empty:
+            st.dataframe(display_clean_barangay_columns(top3_barangays_overall), use_container_width=True)
+            if {"Barangay", "Barangay_cases"}.issubset(top3_barangays_overall.columns):
+                fig_overall = px.bar(
+                    top3_barangays_overall,
+                    x="Barangay",
+                    y="Barangay_cases",
+                    text="Barangay_cases",
+                    title="Three Barangays with the Highest Overall Dengue Cases",
+                )
+                fig_overall.update_traces(textposition="outside")
+                st.plotly_chart(fig_overall, use_container_width=True)
+        else:
+            st.warning("top3_barangays_overall.csv is unavailable.")
 
     st.subheader("Barangay Monthly Records")
-    if barangay_monthly is not None:
-        st.dataframe(barangay_monthly, use_container_width=True)
-
+    if barangay_monthly is not None and not barangay_monthly.empty:
+        st.dataframe(display_clean_barangay_columns(barangay_monthly), use_container_width=True)
+    else:
+        st.warning("barangay_monthly.csv is unavailable.")
 
 with tab3:
     st.header("Model Results")
@@ -611,120 +624,101 @@ with tab3:
     if meta:
         st.success(f"Selected Model: {meta.get('best_model', 'Unknown')}")
 
-    if model_results is not None and not model_results.empty:
-        metric_cols = [c for c in ["model", "accuracy", "precision", "recall", "f1_score", "auc", "n_test_months"] if c in model_results.columns]
-        st.dataframe(round_display_columns(model_results[metric_cols], ["accuracy", "precision", "recall", "f1_score", "auc"], 4), use_container_width=True)
+    if model_comparison is not None and not model_comparison.empty:
+        display_cols = [c for c in ["model", "accuracy", "precision", "recall", "f1_score", "auc", "n_test_months"] if c in model_comparison.columns]
+        display_df = round_display_columns(model_comparison[display_cols], [c for c in display_cols if c != "model"], decimals=4)
+        st.dataframe(display_df, use_container_width=True)
 
-        st.subheader("Model Comparison by SOP Metrics")
-        core_metrics = [c for c in ["accuracy", "precision", "recall", "f1_score"] if c in model_results.columns]
-        if "model" in model_results.columns and core_metrics:
-            results_long = model_results.melt(
+        metric_cols = [c for c in ["accuracy", "precision", "recall", "f1_score", "auc"] if c in model_comparison.columns]
+        if "model" in model_comparison.columns and metric_cols:
+            st.subheader("Model Comparison by Metric")
+            results_long = model_comparison.melt(
                 id_vars="model",
-                value_vars=core_metrics,
+                value_vars=metric_cols,
                 var_name="Metric",
                 value_name="Score",
             )
             fig_model = px.bar(
-                results_long,
+                round_display_columns(results_long, ["Score"], 4),
                 x="model",
                 y="Score",
                 color="Metric",
                 barmode="group",
                 text="Score",
-                title="Model Comparison by Accuracy, Precision, Recall, and F1 Score",
+                title="Model Comparison by Metric",
             )
             fig_model.update_traces(texttemplate="%{text:.4f}", textposition="outside")
+            fig_model.update_yaxes(range=[0, 1.15])
             st.plotly_chart(fig_model, use_container_width=True)
-
-        if "auc" in model_results.columns:
-            with st.expander("View additional AUC metric"):
-                auc_df = round_display_columns(model_results[["model", "auc"]].copy(), ["auc"], 4)
-                st.dataframe(auc_df, use_container_width=True)
     else:
-        st.warning("model_results.csv not found or empty.")
+        st.warning("model_comparison.csv is unavailable.")
 
-    st.subheader("How to read the metrics")
+    st.subheader("How to Read the Metrics")
     st.markdown(
         """
-- **Accuracy** shows the overall proportion of correct monthly classifications.  
-- **Precision** shows how often an outbreak prediction is correct.  
-- **Recall / Sensitivity** shows how many actual outbreak months the model catches.  
-- **F1 score** is the reliability metric because it balances precision and recall.  
-
-A model can have high accuracy but still miss outbreak months, so precision, recall, and F1 score should be interpreted together.
+**Accuracy** measures the overall percentage of correct classifications. **Precision** measures how often predicted outbreak months are actually outbreaks. **Recall/Sensitivity** measures how many actual outbreak months the model catches. **F1 score** balances precision and recall, making it useful when outbreak and non-outbreak months are imbalanced. **AUC** summarizes how well the model separates outbreak from non-outbreak months across probability thresholds.
 """
     )
 
     st.subheader("Month-by-Month Test Predictions")
     if test_predictions is not None and not test_predictions.empty:
         total_test = len(test_predictions)
-        correct_test = int(pd.to_numeric(test_predictions.get("is_correct", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()) if "is_correct" in test_predictions.columns else None
-        test_col1, test_col2 = st.columns(2)
-        test_col1.metric("Test Set Months", total_test)
-        test_col2.metric("Correct Predictions", correct_test if correct_test is not None else "N/A")
-        st.dataframe(round_display_columns(test_predictions, ["predicted_probability"], 4), use_container_width=True)
+        correct_test = int(pd.to_numeric(test_predictions["is_correct"], errors="coerce").fillna(0).sum()) if "is_correct" in test_predictions.columns else "N/A"
+        c1, c2 = st.columns(2)
+        c1.metric("Test Set Months", total_test)
+        c2.metric("Correct Predictions", correct_test)
+        st.dataframe(test_predictions, use_container_width=True)
     else:
-        st.warning("test_predictions.csv not found or empty.")
+        st.warning("test_predictions.csv is unavailable.")
 
 with tab4:
     st.header("Feature Transparency")
 
-    st.subheader("Feature Importance")
+    st.subheader("Primary Contributing Features")
     if feature_importance is not None and not feature_importance.empty:
-        st.dataframe(round_display_columns(feature_importance, ["importance_mean", "importance_std"], 4), use_container_width=True)
+        st.dataframe(round_display_columns(feature_importance, ["importance_mean", "importance_std"], 6), use_container_width=True)
         if {"feature", "importance_mean"}.issubset(feature_importance.columns):
-            plot_df = round_display_columns(feature_importance.head(15), ["importance_mean"], 4)
             fig_importance = px.bar(
-                plot_df,
+                feature_importance.sort_values("importance_mean", ascending=True).tail(15),
                 x="importance_mean",
                 y="feature",
                 orientation="h",
-                text="importance_mean",
-                title="Most Influential Contributing Features",
+                title="Primary Contributing Features",
             )
-            fig_importance.update_traces(texttemplate="%{text:.4f}", textposition="outside")
-            fig_importance.update_layout(yaxis={"categoryorder": "total ascending"})
             st.plotly_chart(fig_importance, use_container_width=True)
     else:
-        st.warning("feature_importance.csv not found or empty.")
+        st.warning("feature_importance.csv is unavailable.")
 
     st.subheader("Sensitivity Analysis")
-    if sensitivity is not None and not sensitivity.empty:
-        st.dataframe(round_display_columns(sensitivity, ["base_avg_outbreak_probability", "new_avg_outbreak_probability", "delta_probability"], 4), use_container_width=True)
-        if {"feature", "delta_probability"}.issubset(sensitivity.columns):
-            sens_df = round_display_columns(sensitivity, ["delta_probability"], 4)
+    if feature_sensitivity is not None and not feature_sensitivity.empty:
+        st.dataframe(round_display_columns(feature_sensitivity, ["base_avg_outbreak_probability", "new_avg_outbreak_probability", "delta_probability"], 6), use_container_width=True)
+        if {"feature", "delta_probability"}.issubset(feature_sensitivity.columns):
             fig_sens = px.bar(
-                sens_df,
+                round_display_columns(feature_sensitivity, ["delta_probability"], 6),
                 x="feature",
                 y="delta_probability",
                 text="delta_probability",
-                title="Effect of +10% Change in Climate Variable on Outbreak Probability",
+                title="Effect of +10% Change in Climate Variables on Outbreak Probability",
             )
-            fig_sens.update_traces(texttemplate="%{text:.4f}", textposition="outside")
+            fig_sens.update_traces(texttemplate="%{text:.6f}", textposition="outside")
             st.plotly_chart(fig_sens, use_container_width=True)
     else:
-        st.warning("sensitivity_analysis.csv not found or empty.")
+        st.warning("feature_sensitivity.csv is unavailable.")
 
-    st.subheader("How to interpret this")
-    st.markdown(
-        """
-- **Feature importance** shows which variables the selected model relied on most during classification.  
-- **Lagged case variables** indicate that recent dengue history contributes to prediction.  
-- **Sensitivity analysis** estimates how outbreak probability changes when a climate variable increases by 10%.  
-- These outputs explain model behavior; they do not prove biological causation by themselves.
-"""
+    st.info(
+        "Feature importance and sensitivity analysis explain model behavior. They do not, by themselves, prove direct biological causation."
     )
 
 with tab5:
     st.header("Forecast & Live Prediction")
 
-    st.subheader("5-Year Forecast")
+    st.subheader("Five-Year Forecast")
     if forecast is not None and not forecast.empty:
         st.dataframe(round_display_columns(forecast.head(30), ["predicted_outbreak_probability", "predicted_city_cases_proxy"], 4), use_container_width=True)
 
         if {"Date", "predicted_outbreak_probability"}.issubset(forecast.columns):
             fig_forecast = px.line(
-                round_display_columns(forecast, ["predicted_outbreak_probability"], 4),
+                forecast,
                 x="Date",
                 y="predicted_outbreak_probability",
                 markers=True,
@@ -733,49 +727,73 @@ with tab5:
             st.plotly_chart(fig_forecast, use_container_width=True)
 
         if {"Year", "Month", "predicted_outbreak_probability"}.issubset(forecast.columns):
-            forecast_heat = forecast.pivot_table(
-                index="Year",
-                columns="Month",
-                values="predicted_outbreak_probability",
-            )
+            forecast_heat = forecast.pivot_table(index="Year", columns="Month", values="predicted_outbreak_probability")
             fig_forecast_heat = px.imshow(
                 forecast_heat,
-                text_auto=True,
+                text_auto=".4f",
                 aspect="auto",
-                color_continuous_scale="Blues",
+                color_continuous_scale="Reds",
                 title="Forecast Heatmap of Outbreak Probability",
             )
             fig_forecast_heat.update_xaxes(title="Month")
             fig_forecast_heat.update_yaxes(title="Year")
             st.plotly_chart(fig_forecast_heat, use_container_width=True)
     else:
-        st.warning("forecast_df.csv not found or empty.")
+        st.warning("forecast_5yr.csv or forecast_df.csv is unavailable.")
 
+    st.subheader("Three Barangays with the Highest Predicted Risk for Forecast Months")
+    if forecast_top3_barangays is not None and not forecast_top3_barangays.empty:
+        display_forecast_top3 = round_display_columns(
+            forecast_top3_barangays,
+            ["overall_share", "recent_share", "seasonal_share", "risk_score_raw", "risk_score", "predicted_outbreak_probability", "predicted_city_cases_proxy", "predicted_barangay_cases_proxy"],
+            decimals=4,
+        )
+        st.dataframe(display_forecast_top3, use_container_width=True)
+
+        if "Date" in forecast_top3_barangays.columns and {"Barangay", "predicted_barangay_cases_proxy"}.issubset(forecast_top3_barangays.columns):
+            month_options = forecast_top3_barangays["Date"].dropna().astype(str).unique().tolist()
+            selected_month = st.selectbox("Select forecast month for barangay ranking", month_options)
+            selected_barangay_forecast = forecast_top3_barangays[forecast_top3_barangays["Date"].astype(str) == selected_month].copy()
+            fig_barangay_forecast = px.bar(
+                round_display_columns(selected_barangay_forecast, ["predicted_barangay_cases_proxy"], decimals=2),
+                x="Barangay",
+                y="predicted_barangay_cases_proxy",
+                color="Barangay",
+                text="predicted_barangay_cases_proxy",
+                title=f"Three Barangays with the Highest Predicted Risk - {selected_month}",
+            )
+            fig_barangay_forecast.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            st.plotly_chart(fig_barangay_forecast, use_container_width=True)
+    else:
+        st.warning("forecast_top3_barangays.csv is unavailable.")
+
+    st.markdown("---")
     st.subheader("Live Prediction")
     st.info(
-        "Select a target year-month, enter climate values for that month, and enter dengue case counts from the previous three months. "
-        "The dashboard automatically prepares lagged climate variables, rolling case features, and seasonality inputs."
+        "Select a target year-month, enter the target month's climate values and the previous three months of dengue cases, then click Predict. The dashboard prepares the lag, rolling, and seasonal model inputs automatically."
     )
 
-    with st.expander("How to understand the live prediction inputs"):
+    with st.expander("Input guide", expanded=False):
         st.markdown(
             """
-**Rainfall, relative humidity, and temperature** should describe the selected target month.  
-**Cases last month, 2 months ago, and 3 months ago** should describe the three months immediately before the selected target month.  
-The result is a monthly outbreak classification, not a population percentage or exact case count.
+**Rainfall, relative humidity, and temperature** should refer to the target month itself. For example, if predicting February 2027, enter the climate values for February 2027. **Cases Last Month**, **Cases 2 Months Ago**, and **Cases 3 Months Ago** should refer to January 2027, December 2026, and November 2026 respectively. The output is a monthly outbreak classification, not a percentage of the population.
 """
         )
 
     if model is None:
-        st.warning("Model file not found. Live prediction is unavailable until best_model.joblib is added.")
+        st.warning("best_model.joblib is unavailable, so live prediction cannot run yet.")
     else:
-        if forecast is not None and not forecast.empty and {"Year", "Month"}.issubset(forecast.columns):
-            year_options = sorted(pd.to_numeric(forecast["Year"], errors="coerce").dropna().astype(int).unique().tolist())
-        else:
-            max_year = int(pd.to_numeric(monthly.get("Year", pd.Series([2025])), errors="coerce").dropna().max()) if "Year" in monthly.columns else 2025
-            year_options = list(range(max_year + 1, max_year + 6))
-        month_options = list(range(1, 13))
+        feature_columns = meta.get("feature_columns", DEFAULT_FEATURE_COLS) if meta else DEFAULT_FEATURE_COLS
 
+        if forecast is not None and not forecast.empty and "Year" in forecast.columns:
+            year_options = sorted(pd.to_numeric(forecast["Year"], errors="coerce").dropna().astype(int).unique().tolist())
+        elif "Year" in monthly.columns:
+            last_year = int(pd.to_numeric(monthly["Year"], errors="coerce").max())
+            year_options = list(range(last_year + 1, last_year + 6))
+        else:
+            year_options = [2026, 2027, 2028, 2029, 2030]
+
+        month_options = list(range(1, 13))
         select_col1, select_col2 = st.columns(2)
         with select_col1:
             selected_year_num = st.selectbox("Select Year", year_options, index=0)
@@ -789,33 +807,28 @@ The result is a monthly outbreak classification, not a population percentage or 
 
         target_forecast_row = get_forecast_row(forecast, selected_year_num, selected_month_num)
 
-        rainfall_default = numeric_from_row(target_forecast_row, "rainfall", get_profile_value(selected_month_num, "rainfall", month_profile, monthly, 0.0))
-        humidity_default = numeric_from_row(target_forecast_row, "relative_humidity", get_profile_value(selected_month_num, "relative_humidity", month_profile, monthly, 0.0))
-        temp_default = numeric_from_row(target_forecast_row, "temp_mid", get_profile_value(selected_month_num, "temp_mid", month_profile, monthly, 0.0))
+        rainfall_default = get_profile_value(selected_month_num, "rainfall", month_profile, monthly, 0.0)
+        humidity_default = get_profile_value(selected_month_num, "relative_humidity", month_profile, monthly, 0.0)
+        temp_default = get_profile_value(selected_month_num, "temp_mid", month_profile, monthly, 0.0)
 
-        default_cases_lag_1 = numeric_from_row(target_forecast_row, "cases_lag_1", float(monthly["CHSO_cases"].iloc[-1]) if "CHSO_cases" in monthly.columns and len(monthly) >= 1 else 0.0)
-        default_cases_lag_2 = numeric_from_row(target_forecast_row, "cases_lag_2", float(monthly["CHSO_cases"].iloc[-2]) if "CHSO_cases" in monthly.columns and len(monthly) >= 2 else default_cases_lag_1)
-        default_cases_lag_3 = numeric_from_row(target_forecast_row, "cases_lag_3", float(monthly["CHSO_cases"].iloc[-3]) if "CHSO_cases" in monthly.columns and len(monthly) >= 3 else default_cases_lag_2)
+        if target_forecast_row is not None:
+            rainfall_default = float(target_forecast_row.get("rainfall", rainfall_default))
+            humidity_default = float(target_forecast_row.get("relative_humidity", humidity_default))
+            temp_default = float(target_forecast_row.get("temp_mid", temp_default))
 
-        rain_min, rain_max = 0.0, max(1000.0, rainfall_default + 1.0)
-        rh_min, rh_max = get_reasonable_range(monthly, "relative_humidity", 60.0, 100.0, [humidity_default])
-        rh_min = min(0.0, rh_min)
-        rh_max = max(100.0, rh_max)
-        temp_min, temp_max = get_reasonable_range(monthly, "temp_mid", 10.0, 35.0, [temp_default])
-        temp_min = min(10.0, temp_min)
-        temp_max = max(35.0, temp_max)
-        cases_min, cases_max = get_reasonable_range(monthly, "CHSO_cases", 0.0, 3000.0, [default_cases_lag_1, default_cases_lag_2, default_cases_lag_3])
-        cases_min = 0.0
-        cases_max = max(10.0, cases_max)
+        rain_min, rain_max = 0.0, max(1000.0, get_reasonable_range(monthly, "rainfall", 0.0, 1000.0)[1])
+        rh_min, rh_max = get_reasonable_range(monthly, "relative_humidity", 60.0, 100.0)
+        temp_min, temp_max = 10.0, 35.0
+        cases_min, cases_max = get_reasonable_range(monthly, "CHSO_cases", 0.0, 3000.0)
 
-        st.markdown(f"### Inputs for {month_name_from_number(selected_month_num)} {selected_year_num}")
+        st.markdown(f"### Target Month: {month_name_from_number(selected_month_num)} {selected_year_num}")
         climate_col1, climate_col2, climate_col3 = st.columns(3)
         with climate_col1:
             rainfall_now = st.slider(
                 "Current Rainfall (mm)",
                 min_value=float(round(rain_min, 2)),
                 max_value=float(round(rain_max, 2)),
-                value=float(round(clamp(rainfall_default, rain_min, rain_max), 2)),
+                value=float(round(rainfall_default, 2)),
                 step=1.0,
             )
         with climate_col2:
@@ -823,7 +836,7 @@ The result is a monthly outbreak classification, not a population percentage or 
                 "Current Relative Humidity (%)",
                 min_value=float(round(rh_min, 2)),
                 max_value=float(round(rh_max, 2)),
-                value=float(round(clamp(humidity_default, rh_min, rh_max), 2)),
+                value=float(round(min(max(humidity_default, rh_min), rh_max), 2)),
                 step=0.1,
             )
         with climate_col3:
@@ -831,36 +844,29 @@ The result is a monthly outbreak classification, not a population percentage or 
                 "Current Temperature (°C)",
                 min_value=float(round(temp_min, 2)),
                 max_value=float(round(temp_max, 2)),
-                value=float(round(clamp(temp_default, temp_min, temp_max), 2)),
+                value=float(round(min(max(temp_default, temp_min), temp_max), 2)),
                 step=0.1,
             )
 
         st.markdown("### Recent Dengue Case History")
+        if target_forecast_row is not None:
+            default_cases_lag_1 = float(target_forecast_row.get("cases_lag_1", 0.0))
+            default_cases_lag_2 = float(target_forecast_row.get("cases_lag_2", default_cases_lag_1))
+            default_cases_lag_3 = float(target_forecast_row.get("cases_lag_3", default_cases_lag_2))
+        else:
+            cases_series = pd.to_numeric(monthly["CHSO_cases"], errors="coerce").dropna() if "CHSO_cases" in monthly.columns else pd.Series(dtype=float)
+            default_cases_lag_1 = float(cases_series.iloc[-1]) if len(cases_series) >= 1 else 0.0
+            default_cases_lag_2 = float(cases_series.iloc[-2]) if len(cases_series) >= 2 else default_cases_lag_1
+            default_cases_lag_3 = float(cases_series.iloc[-3]) if len(cases_series) >= 3 else default_cases_lag_2
+
+        max_cases_slider = int(max(cases_max, default_cases_lag_1, default_cases_lag_2, default_cases_lag_3, 1))
         case_col1, case_col2, case_col3 = st.columns(3)
         with case_col1:
-            cases_lag_1 = st.slider(
-                "Cases Last Month",
-                min_value=int(cases_min),
-                max_value=int(np.ceil(cases_max)),
-                value=int(round(clamp(default_cases_lag_1, cases_min, cases_max))),
-                step=1,
-            )
+            cases_lag_1 = st.slider("Cases Last Month", 0, max_cases_slider, int(round(default_cases_lag_1)), step=1)
         with case_col2:
-            cases_lag_2 = st.slider(
-                "Cases 2 Months Ago",
-                min_value=int(cases_min),
-                max_value=int(np.ceil(cases_max)),
-                value=int(round(clamp(default_cases_lag_2, cases_min, cases_max))),
-                step=1,
-            )
+            cases_lag_2 = st.slider("Cases 2 Months Ago", 0, max_cases_slider, int(round(default_cases_lag_2)), step=1)
         with case_col3:
-            cases_lag_3 = st.slider(
-                "Cases 3 Months Ago",
-                min_value=int(cases_min),
-                max_value=int(np.ceil(cases_max)),
-                value=int(round(clamp(default_cases_lag_3, cases_min, cases_max))),
-                step=1,
-            )
+            cases_lag_3 = st.slider("Cases 3 Months Ago", 0, max_cases_slider, int(round(default_cases_lag_3)), step=1)
 
         auto_feature_values = build_live_prediction_features(
             year_num=selected_year_num,
@@ -872,59 +878,72 @@ The result is a monthly outbreak classification, not a population percentage or 
             cases_lag_2=cases_lag_2,
             cases_lag_3=cases_lag_3,
             month_profile_df=month_profile,
-            fallback_monthly_df=monthly,
+            monthly_df=monthly,
             forecast_row=target_forecast_row,
         )
 
         input_values = {feature: auto_feature_values.get(feature, 0.0) for feature in feature_columns}
 
-        with st.expander("Show automatically prepared model inputs"):
+        with st.expander("Show automatically prepared model inputs", expanded=False):
             st.dataframe(pd.DataFrame([input_values]), use_container_width=True)
 
         if st.button("Predict", type="primary"):
             input_df = pd.DataFrame([input_values])
-            try:
-                pred = int(model.predict(input_df)[0])
-                prob = float(model.predict_proba(input_df)[0][1]) if hasattr(model, "predict_proba") else np.nan
+            pred = int(model.predict(input_df)[0])
+            if hasattr(model, "predict_proba"):
+                prob = float(model.predict_proba(input_df)[0][1])
+            else:
+                prob = np.nan
 
-                result_col1, result_col2 = st.columns(2)
-                result_col1.success(f"Predicted Class: {outbreak_label_from_binary(pred)}")
-                if pd.isna(prob):
-                    result_col2.info("Predicted Outbreak Probability: not available")
-                else:
-                    result_col2.info(f"Predicted Outbreak Probability: {prob:.4f}")
+            result_col1, result_col2 = st.columns(2)
+            result_col1.success(f"Predicted Class: {outbreak_label_from_binary(pred)}")
+            result_col2.info(f"Predicted Outbreak Probability: {prob:.4f}" if not pd.isna(prob) else "Probability not available")
 
-                st.markdown(
-                    """
-**How to read this result**  
-**0** means non-outbreak month. **1** means outbreak month. The probability is the model's estimated likelihood that the selected month belongs to the outbreak class.
-"""
+            st.caption("0 = Non-outbreak month; 1 = Outbreak month. Probability is the model's estimated likelihood of the outbreak class.")
+
+            st.subheader("Barangays with the Highest Predicted Risk")
+            if barangay_risk_profile is not None and not barangay_risk_profile.empty:
+                barangay_live = barangay_risk_profile.copy()
+                for col in ["overall_share", "recent_share", "seasonal_share"]:
+                    if col not in barangay_live.columns:
+                        barangay_live[col] = 0.0
+
+                if "Month" in barangay_live.columns:
+                    seasonal_subset = barangay_live[pd.to_numeric(barangay_live["Month"], errors="coerce") == selected_month_num].copy()
+                    if not seasonal_subset.empty:
+                        barangay_live = seasonal_subset
+
+                barangay_live["risk_score_raw"] = (
+                    0.50 * pd.to_numeric(barangay_live["seasonal_share"], errors="coerce").fillna(0) +
+                    0.30 * pd.to_numeric(barangay_live["recent_share"], errors="coerce").fillna(0) +
+                    0.20 * pd.to_numeric(barangay_live["overall_share"], errors="coerce").fillna(0)
                 )
+                total_score = barangay_live["risk_score_raw"].sum()
+                barangay_live["risk_score"] = barangay_live["risk_score_raw"] / total_score if total_score > 0 else 0.0
+                city_cases_proxy = float(input_values.get("cases_roll3_mean", 0.0)) * (1 + (0 if pd.isna(prob) else prob))
+                barangay_live["predicted_city_cases_proxy"] = city_cases_proxy
+                barangay_live["predicted_barangay_cases_proxy"] = barangay_live["risk_score"] * city_cases_proxy
+                barangay_live["predicted_barangay_label"] = "Higher Risk"
 
-                st.subheader("Likely Highest-Risk Barangays")
-                live_barangays = get_selected_barangay_ranking(
-                    forecast_barangay_ranking,
-                    forecast_top3_barangays,
-                    selected_year_num,
-                    selected_month_num,
-                    prob,
-                    input_values,
-                )
+                keep_cols = [c for c in [
+                    "Barangay", "overall_share", "recent_share", "seasonal_share",
+                    "risk_score_raw", "risk_score", "predicted_city_cases_proxy",
+                    "predicted_barangay_cases_proxy", "predicted_barangay_label",
+                ] if c in barangay_live.columns]
 
-                if live_barangays is not None and not live_barangays.empty:
-                    keep_cols = [c for c in [
-                        "Barangay", "overall_share", "recent_share", "seasonal_share", "risk_score_raw",
-                        "risk_score", "predicted_city_cases_proxy", "predicted_barangay_cases_proxy", "predicted_barangay_label",
-                    ] if c in live_barangays.columns]
-                    display_live = round_display_columns(
-                        live_barangays[keep_cols],
+                barangay_live_high_risk = barangay_live.sort_values("predicted_barangay_cases_proxy", ascending=False).head(3)
+                st.dataframe(
+                    round_display_columns(
+                        barangay_live_high_risk[keep_cols],
                         ["overall_share", "recent_share", "seasonal_share", "risk_score_raw", "risk_score", "predicted_city_cases_proxy", "predicted_barangay_cases_proxy"],
-                        4,
-                    )
-                    st.dataframe(display_live, use_container_width=True)
+                        decimals=4,
+                    ),
+                    use_container_width=True,
+                )
 
+                if {"Barangay", "predicted_barangay_cases_proxy"}.issubset(barangay_live_high_risk.columns):
                     fig_live_barangay = px.bar(
-                        round_display_columns(live_barangays, ["predicted_barangay_cases_proxy"], 2),
+                        round_display_columns(barangay_live_high_risk, ["predicted_barangay_cases_proxy"], decimals=2),
                         x="Barangay",
                         y="predicted_barangay_cases_proxy",
                         color="Barangay",
@@ -933,12 +952,10 @@ The result is a monthly outbreak classification, not a population percentage or 
                     )
                     fig_live_barangay.update_traces(texttemplate="%{text:.2f}", textposition="outside")
                     st.plotly_chart(fig_live_barangay, use_container_width=True)
-                    st.caption("The barangay values are weighted proxy estimates, not confirmed future case counts.")
-                else:
-                    st.info("Barangay ranking is unavailable for this selected month. Add forecast_barangay_ranking.csv or forecast_top3_barangays.csv to the artifacts.")
-            except Exception as exc:
-                st.error(f"Prediction failed: {exc}")
-                st.info("Check that meta.json feature_cols exactly match the features used to train best_model.joblib.")
+
+                st.caption("Barangay case values are weighted proxy estimates for prioritization. They are not confirmed case counts.")
+            else:
+                st.warning("barangay_risk_profile.csv is unavailable.")
 
 st.markdown("---")
-st.caption("Baguio City Dengue Forecast Dashboard")
+st.caption("Baguio City Dengue Forecast Dashboard | Revised Colab-ready version")
