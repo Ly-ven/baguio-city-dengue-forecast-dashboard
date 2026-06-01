@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 st.title("Baguio City Dengue Forecast Dashboard")
-st.caption("Interactive web-based dashboard for dengue prediction, model evaluation, and forecast visualization")
+st.caption("Interactive web-based dashboard for predicting dengue outbreaks in Baguio City")
 
 ARTIFACTS_DIR = Path("artifacts")
 
