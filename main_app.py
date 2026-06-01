@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 st.title("Baguio City Dengue Forecast Dashboard")
-st.caption("Interactive web-based dashboard for predicting dengue outbreaks in Baguio City")
+st.caption("Interactive web-based dashboard for dengue prediction, model evaluation, and forecast visualization")
 
 ARTIFACTS_DIR = Path("artifacts")
 
@@ -487,6 +487,7 @@ with tab1:
     threshold_text = get_threshold_text(meta)
     st.info(
         "The model predicts whether a selected month is classified as an **outbreak** or **non-outbreak** month. "
+        f"The revised Colab metadata reports an outbreak threshold of **{threshold_text}**."
     )
 
     st.subheader("Monthly Dengue Cases")
@@ -568,97 +569,41 @@ with tab1:
 with tab2:
     st.header("Barangay Analytics")
 
-    st.subheader("Forecast Barangay Risk Ranking")
-    if forecast_top3_barangays is not None and not forecast_top3_barangays.empty:
-        display_cols = [c for c in [
-            "Date", "Year", "Month", "Barangay", "overall_share", "recent_share", "seasonal_share",
-            "risk_score_raw", "risk_score", "predicted_outbreak_probability",
-            "predicted_city_cases_proxy", "predicted_barangay_cases_proxy", "predicted_barangay_label",
-        ] if c in forecast_top3_barangays.columns]
-        st.dataframe(
-            round_display_columns(
-                forecast_top3_barangays[display_cols],
-                ["overall_share", "recent_share", "seasonal_share", "risk_score_raw", "risk_score", "predicted_outbreak_probability", "predicted_city_cases_proxy", "predicted_barangay_cases_proxy"],
-                4,
-            ),
-            use_container_width=True,
-        )
-
-        if "Date" in forecast_top3_barangays.columns:
-            month_options = forecast_top3_barangays["Date"].dropna().dt.strftime("%Y-%m").unique().tolist()
-            selected_month_text = st.selectbox("Select forecast month", month_options, key="barangay_forecast_month")
-            selected_rows = forecast_top3_barangays[forecast_top3_barangays["Date"].dt.strftime("%Y-%m") == selected_month_text].copy()
-        elif {"Year", "Month"}.issubset(forecast_top3_barangays.columns):
-            forecast_top3_barangays["YearMonth"] = forecast_top3_barangays["Year"].astype(str) + "-" + forecast_top3_barangays["Month"].astype(str).str.zfill(2)
-            month_options = forecast_top3_barangays["YearMonth"].dropna().unique().tolist()
-            selected_month_text = st.selectbox("Select forecast month", month_options, key="barangay_forecast_month")
-            selected_rows = forecast_top3_barangays[forecast_top3_barangays["YearMonth"] == selected_month_text].copy()
-        else:
-            selected_rows = forecast_top3_barangays.head(3).copy()
-            selected_month_text = "Selected Forecast Month"
-
-        if {"Barangay", "predicted_barangay_cases_proxy"}.issubset(selected_rows.columns):
-            fig_barangay_forecast = px.bar(
-                round_display_columns(selected_rows, ["predicted_barangay_cases_proxy"], 2),
-                x="Barangay",
-                y="predicted_barangay_cases_proxy",
-                color="Barangay",
-                text="predicted_barangay_cases_proxy",
-                title=f"Three Barangays with the Highest Predicted Risk - {selected_month_text}",
-            )
-            fig_barangay_forecast.update_traces(texttemplate="%{text:.2f}", textposition="outside")
-            st.plotly_chart(fig_barangay_forecast, use_container_width=True)
-    else:
-        st.warning("forecast_top3_barangays.csv not found or empty.")
-
-    if forecast_barangay_ranking is not None and not forecast_barangay_ranking.empty:
-        with st.expander("View complete forecast barangay ranking table"):
-            st.dataframe(
-                round_display_columns(
-                    forecast_barangay_ranking,
-                    ["overall_share", "recent_share", "seasonal_share", "risk_score_raw", "risk_score", "predicted_outbreak_probability", "predicted_city_cases_proxy", "predicted_barangay_cases_proxy"],
-                    4,
-                ),
-                use_container_width=True,
-            )
-
-    st.subheader("Historical Barangay Tables")
-    if top_barangay_monthly is not None and not top_barangay_monthly.empty:
-        st.markdown("**Barangay with the highest recorded dengue cases per month**")
+    st.subheader("Barangays with the Highest Monthly Dengue Cases")
+    if top_barangay_monthly is not None:
         st.dataframe(top_barangay_monthly, use_container_width=True)
 
-    hist_col1, hist_col2 = st.columns(2)
-    with hist_col1:
-        if top3_barangays_yearly is not None and not top3_barangays_yearly.empty:
-            st.markdown("**Three barangays with the highest dengue cases per year**")
-            if {"Year", "Barangay", "Barangay_cases"}.issubset(top3_barangays_yearly.columns):
-                fig_tree = px.treemap(
-                    top3_barangays_yearly,
-                    path=["Year", "Barangay"],
-                    values="Barangay_cases",
-                    color="Barangay_cases",
-                    title="Three Barangays with the Highest Dengue Cases per Year",
-                )
-                st.plotly_chart(fig_tree, use_container_width=True)
-            st.dataframe(top3_barangays_yearly, use_container_width=True)
-    with hist_col2:
-        if top3_barangays_overall is not None and not top3_barangays_overall.empty:
-            st.markdown("**Three barangays with the highest dengue cases overall**")
-            if {"Barangay", "Barangay_cases"}.issubset(top3_barangays_overall.columns):
-                fig_top3 = px.bar(
-                    top3_barangays_overall,
-                    x="Barangay",
-                    y="Barangay_cases",
-                    text="Barangay_cases",
-                    title="Three Barangays with the Highest Overall Dengue Cases",
-                )
-                fig_top3.update_traces(textposition="outside")
-                st.plotly_chart(fig_top3, use_container_width=True)
-            st.dataframe(top3_barangays_overall, use_container_width=True)
+    st.subheader("Barangays with the Highest Dengue Cases")
+    ranking_choice = st.radio(
+        "Choose ranking view",
+        ["Three Highest per Year", "Three Highest Overall"],
+        horizontal=True
+    )
 
-    if barangay_monthly is not None and not barangay_monthly.empty:
-        with st.expander("View barangay monthly records"):
-            st.dataframe(barangay_monthly, use_container_width=True)
+    if ranking_choice == "Three Highest per Year" and top3_barangays_yearly is not None and not top3_barangays_yearly.empty:
+        fig_tree = px.treemap(
+            top3_barangays_yearly,
+            path=["Year", "Barangay"],
+            values="Barangay_cases",
+            color="Barangay_cases",
+            title="Three Barangays with the Highest Dengue Cases per Year"
+        )
+        st.plotly_chart(fig_tree, use_container_width=True)
+
+    elif ranking_choice == "Three Highest Overall" and top3_barangays_overall is not None and not top3_barangays_overall.empty:
+        fig_top3 = px.bar(
+            top3_barangays_overall,
+            x="Barangay",
+            y="Barangay_cases",
+            text="Barangay_cases",
+            title="Three Barangays with the Highest Overall Dengue Cases"
+        )
+        st.plotly_chart(fig_top3, use_container_width=True)
+
+    st.subheader("Barangay Monthly Records")
+    if barangay_monthly is not None:
+        st.dataframe(barangay_monthly, use_container_width=True)
+
 
 with tab3:
     st.header("Model Results")
