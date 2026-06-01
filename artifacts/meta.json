@@ -1,0 +1,30 @@
+{
+  "problem_definition": "Monthly dengue outbreak classification for Baguio City",
+  "outbreak_definition": "A month is labeled as outbreak if monthly CHSO cases are greater than or equal to the 75th percentile threshold (199.25 cases).",
+  "outbreak_threshold_cases": 199.25,
+  "best_model": "RandomForest",
+  "feature_columns": [
+    "rainfall",
+    "relative_humidity",
+    "temp_mid",
+    "cases_lag_1",
+    "cases_lag_2",
+    "cases_lag_3",
+    "rainfall_lag_1",
+    "rainfall_lag_2",
+    "rainfall_lag_3",
+    "relative_humidity_lag_1",
+    "relative_humidity_lag_2",
+    "relative_humidity_lag_3",
+    "temp_mid_lag_1",
+    "temp_mid_lag_2",
+    "temp_mid_lag_3",
+    "cases_roll3_mean",
+    "cases_roll3_max",
+    "month_sin",
+    "month_cos"
+  ],
+  "train_months": 39,
+  "test_months": 18,
+  "test_split_note": "Chronological split using the last 18 months as the test set."
+}

@@ -1,0 +1,4 @@
+model,AUC
+RandomForest,0.9538461538461538
+XGBoost,1.0
+GaussianNB,1.0
