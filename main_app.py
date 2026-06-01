@@ -487,7 +487,6 @@ with tab1:
     threshold_text = get_threshold_text(meta)
     st.info(
         "The model predicts whether a selected month is classified as an **outbreak** or **non-outbreak** month. "
-        f"The revised Colab metadata reports an outbreak threshold of **{threshold_text}**."
     )
 
     st.subheader("Monthly Dengue Cases")
